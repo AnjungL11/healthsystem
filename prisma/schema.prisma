@@ -1,0 +1,132 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// 业务状态枚举
+enum QuizStatus {
+  IN_PROGRESS // 测评进行中
+  COMPLETED   // 测评已完成并生成报告
+}
+
+enum SubscriptionStatus {
+  INACTIVE    // 未激活、未订阅
+  ACTIVE      // 活跃、已订阅
+  EXPIRED     // 已过期
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ExerciseFrequency {
+  RARELY      // 几乎不运动
+  LIGHT       // 轻度运动 (1-2次/周)
+  MODERATE    // 中度运动 (3-5次/周)
+  ACTIVE      // 活跃 (每天)
+  VERY_ACTIVE // 非常活跃
+}
+
+enum PaymentStatus {
+  PENDING     // 支付处理中
+  SUCCESS     // 支付成功
+  FAILED      // 支付失败
+}
+
+// 核心数据模型
+model User {
+  id           String               @id @default(uuid())
+  sessionId    String               @unique @map("session_id")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+  
+  quizSession  QuizSession?
+  subscription Subscription?
+  payments     PaymentTransaction[] // 关联支付流水记录
+
+  @@map("users")
+}
+
+model QuizSession {
+  id           String             @id @default(uuid())
+  userId       String             @unique @map("user_id")
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  currentStep  Int                @default(1) @map("current_step")
+  status       QuizStatus         @default(IN_PROGRESS)
+  
+  // 增量填写的业务字段
+  gender       Gender?
+  age          Int?
+  height       Float?
+  weight       Float?
+  targetWeight Float?             @map("target_weight")
+  exerciseFreq ExerciseFrequency? @map("exercise_freq")
+  
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  assessmentResult AssessmentResult?
+
+  @@map("quiz_sessions")
+}
+
+model AssessmentResult {
+  id                  String      @id @default(uuid())
+  quizSessionId       String      @unique @map("quiz_session_id")
+  quizSession         QuizSession @relation(fields: [quizSessionId], references: [id], onDelete: Cascade)
+  
+  bmi                 Float
+  recommendedCalories Int         @map("recommended_calories")
+  targetDate          DateTime    @map("target_date")
+  // 存储预测曲线数据，鉴权拦截时针对此字段进行脱敏
+  predictionCurve     Json?       @map("prediction_curve") 
+  
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@map("assessment_results")
+}
+
+model Subscription {
+  id          String             @id @default(uuid())
+  userId      String             @unique @map("user_id")
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  status      SubscriptionStatus @default(INACTIVE)
+  paidAt      DateTime?          @map("paid_at")
+  expiresAt   DateTime?          @map("expires_at") // 支持未来订阅过期逻辑
+  
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  @@map("subscriptions")
+}
+
+model PaymentTransaction {
+  id                String        @id @default(uuid())
+  userId            String        @map("user_id")
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  amount            Int           // 交易金额
+  currency          String        @default("USD")
+  status            PaymentStatus @default(PENDING)
+  providerReference String?       @map("provider_reference") // 模拟第三方支付平台的订单号
+  
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("payment_transactions")
+}

@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { CalculatePayloadSchema } from '@/lib/validations';
+import { calculateHealthMetrics } from '@/lib/algorithm';
 
 export async function POST(request: Request) {
   try {
@@ -28,16 +29,13 @@ export async function POST(request: Request) {
 
     const qs = user.quizSession;
 
-    // 边界检查：确保必填数据都已经填完了，否则无法计算
+    // 边界检查
     if (!qs.age || !qs.height || !qs.weight || !qs.targetWeight || !qs.gender) {
       return NextResponse.json({ 
         success: false, 
         error: '测评数据不完整，请先完成前置问卷' 
-      }, { status: 422 }); // 422 Unprocessable Entity
+      }, { status: 422 });
     }
-
-    // 动态引入算法 (避免文件顶层的依赖冲突)
-    const { calculateHealthMetrics } = await import('@/lib/algorithm');
 
     // 执行核心算法
     const metrics = calculateHealthMetrics({
@@ -49,11 +47,44 @@ export async function POST(request: Request) {
       exerciseFreq: qs.exerciseFreq || 'RARELY',
     });
 
-    // 返回计算结果给前端展示
+    // 将 daysToGoal 转换为具体的 TargetDate (目标达成日期)
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + metrics.forecast.daysToGoal);
+
+    // 更新 Quiz 状态为 COMPLETED，并 upsert 写入 AssessmentResult
+    const updatedSession = await prisma.quizSession.update({
+      where: { id: qs.id },
+      data: {
+        status: 'COMPLETED',
+        assessmentResult: {
+          upsert: {
+            create: {
+              bmi: metrics.overview.bmi,
+              recommendedCalories: metrics.nutrition.dailyCalories,
+              targetDate: targetDate,
+              predictionCurve: metrics.forecast.projection, 
+            },
+            update: {
+              bmi: metrics.overview.bmi,
+              recommendedCalories: metrics.nutrition.dailyCalories,
+              targetDate: targetDate,
+              predictionCurve: metrics.forecast.projection,
+            }
+          }
+        }
+      },
+      include: {
+        assessmentResult: true
+      }
+    });
+
     return NextResponse.json({
       success: true,
-      message: '计算完成',
-      data: metrics
+      message: '健康评估报告生成且保存成功',
+      data: {
+        fullMetrics: metrics, 
+        resultId: updatedSession.assessmentResult?.id 
+      }
     }, { status: 200 });
 
   } catch (error) {

@@ -6,29 +6,43 @@ import { SyncQuizSchema } from '@/lib/validations';
 import { z } from 'zod';
 
 export async function POST(request: Request) {
-
   try {
     // 解析请求体
     const body = await request.json();
 
     // Zod 校验边界
     const validatedData = SyncQuizSchema.parse(body);
+    const { sessionId, currentStep, ...rawQuizData } = validatedData;
 
-    const { sessionId, currentStep, ...quizData } = validatedData;
+    // 把所有前端传过来的空字符串 "" 转换成 undefined，避免 Prisma 枚举报错
+    const cleanQuizData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(rawQuizData)) {
+      // 先判断它确实是个字符串，再判断它是不是空串或纯空格
+      if (typeof value === 'string' && value.trim() === '') {
+        cleanQuizData[key] = undefined;
+      } else {
+        cleanQuizData[key] = value;
+      }
+    }
 
-    // 利用 Prisma 的事务或嵌套写法保证 User 和 Session 的一致性
-    // 基于 sessionId 查找
+    // 利用 Prisma 的事务或嵌套写法保证一致性
     const user = await prisma.user.upsert({
       where: { 
         sessionId: sessionId 
       },
       update: {
-        // 用户已存在，更新关联的 QuizSession 增量数据
+        // 即便 User 存在但 QuizSession 丢失，也能自动补齐，不会报 Record Not Found
         quizSession: {
-          update: {
-            currentStep,
-            ...quizData,
-            updatedAt: new Date(), // 显式更新时间
+          upsert: {
+            update: {
+              currentStep,
+              ...cleanQuizData,
+              updatedAt: new Date(), 
+            },
+            create: {
+              currentStep,
+              ...cleanQuizData,
+            }
           }
         }
       },
@@ -38,7 +52,7 @@ export async function POST(request: Request) {
         quizSession: {
           create: {
             currentStep,
-            ...quizData
+            ...cleanQuizData
           }
         },
         // 同时初始化一个未激活的订阅状态
@@ -54,8 +68,7 @@ export async function POST(request: Request) {
       }
     });
 
-    // 成功操作完成后手动断开临时连接
-    await prisma.$disconnect();
+    // 依靠底层的 Prisma 引擎自动管理连接池，避免并发情况下的连接丢失报错
 
     // 返回成功响应与最新的持久化数据
     return NextResponse.json({
@@ -68,9 +81,6 @@ export async function POST(request: Request) {
     }, { status: 200 });
 
   } catch (error: unknown) {
-    // 发生异常时也要确保断开连接，避免连接泄露
-    await prisma.$disconnect();
-
     // 统一异常处理
     if (error instanceof z.ZodError) {
       // 捕获 Zod 校验错误，返回 400 Bad Request

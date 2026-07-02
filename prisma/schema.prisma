@@ -11,18 +11,19 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // 业务状态枚举
 enum QuizStatus {
-  IN_PROGRESS // 测评进行中
-  COMPLETED   // 测评已完成并生成报告
+  IN_PROGRESS
+  COMPLETED
 }
 
 enum SubscriptionStatus {
-  INACTIVE    // 未激活、未订阅
-  ACTIVE      // 活跃、已订阅
-  EXPIRED     // 已过期
+  INACTIVE
+  ACTIVE
+  EXPIRED
 }
 
 enum Gender {
@@ -32,18 +33,50 @@ enum Gender {
 }
 
 enum ExerciseFrequency {
-  RARELY      // 几乎不运动
-  LIGHT       // 轻度运动 (1-2次/周)
-  MODERATE    // 中度运动 (3-5次/周)
-  ACTIVE      // 活跃 (每天)
-  VERY_ACTIVE // 非常活跃
+  RARELY
+  LIGHT
+  MODERATE
+  ACTIVE
+  VERY_ACTIVE
 }
 
 enum PaymentStatus {
-  PENDING     // 支付处理中
-  SUCCESS     // 支付成功
-  FAILED      // 支付失败
+  PENDING
+  SUCCESS
+  FAILED
 }
+
+enum BodyType {
+  APPLE
+  PEAR
+  HOURGLASS
+  INVERTED_TRIANGLE
+  RECTANGLE
+}
+
+enum DietType {
+  STANDARD
+  VEGAN
+  VEGETARIAN
+  KETO
+  PALEO
+  MEDITERRANEAN
+}
+
+enum SleepQuality {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum StressLevel {
+  LOW
+  MEDIUM
+  HIGH
+  EXTREME
+}
+
 
 // 核心数据模型
 model User {
@@ -67,19 +100,34 @@ model QuizSession {
   currentStep  Int                @default(1) @map("current_step")
   status       QuizStatus         @default(IN_PROGRESS)
   
-  // 增量填写的业务字段
+  // 基础物理体征
   gender       Gender?
   age          Int?
   height       Float?
   weight       Float?
   targetWeight Float?             @map("target_weight")
+  
+  // 目标与身型
+  bodyType     BodyType?          @map("body_type")
+  targetAreas  String[]           // 目标部位多选，例如 ["BELLY", "THIGHS", "ARMS"]
+  
+  // 活动与运动
   exerciseFreq ExerciseFrequency? @map("exercise_freq")
+  dailySteps   Int?               @map("daily_steps") // 每日步数
+  
+  // 营养与饮食习惯
+  dietType     DietType?          @default(STANDARD) @map("diet_type")
+  waterHabit   String?            @map("water_habit") // 饮水习惯
+  
+  // 生活方式与心理
+  sleepHours   Float?             @map("sleep_hours")
+  sleepQuality SleepQuality?      @map("sleep_quality")
+  stressLevel  StressLevel?       @map("stress_level")
+  badHabits    String[]           // 不良习惯多选，例如 ["LATE_NIGHT_SNACK", "SWEETS", "ALCOHOL"]
   
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @updatedAt @map("updated_at")
-
   assessmentResult AssessmentResult?
-
   @@map("quiz_sessions")
 }
 
